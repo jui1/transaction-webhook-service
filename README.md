@@ -6,7 +6,11 @@ I built it for a backend assessment. The hard part is not the HTTP endpoint. The
 
 The webhook handler only writes to PostgreSQL. A separate process later picks up that row and hands it to a Celery worker. The worker waits 30 seconds, standing in for a slow external payment call, and then marks the transaction processed.
 
-This project has not been deployed. There is no public API URL in this repo.
+The API is deployed on Render:
+
+https://transaction-webhook-service-2.onrender.com
+
+Source code: https://github.com/jui1/transaction-webhook-service
 
 ## How it works
 
@@ -417,7 +421,21 @@ The automated tests do not start PostgreSQL or Redis. `FOR UPDATE SKIP LOCKED` o
 
 ## Deployment
 
-This repo is not deployed. After you deploy it, the public URL is whatever hostname the host gives the web service. Put that URL in your submission. Do not invent one.
+The web service is deployed on Render:
+
+https://transaction-webhook-service-2.onrender.com
+
+```bash
+curl -sS https://transaction-webhook-service-2.onrender.com/
+curl -sS -D - -H 'Content-Type: application/json' \
+  -d '{"transaction_id":"txn_abc123def456","source_account":"acc_user_789","destination_account":"acc_merchant_456","amount":1500,"currency":"INR"}' \
+  https://transaction-webhook-service-2.onrender.com/v1/webhooks/transactions
+curl -sS https://transaction-webhook-service-2.onrender.com/v1/transactions/txn_abc123def456
+```
+
+A check on 20 October 2026 returned HTTP 202 for that webhook and stored the row as `PROCESSING`. `processed_at` was still `null` about a minute later. The status becomes `PROCESSED` only after the Celery worker and the outbox dispatcher are running with the same `DATABASE_URL` and `REDIS_URL` as the web service. The free web service also sleeps when it is idle, so the first request after that can take about a minute.
+
+The steps below are how that Render service was set up, and how to add the worker and dispatcher.
 
 You need five pieces:
 
@@ -435,14 +453,7 @@ The image entrypoint runs `alembic upgrade head` and then the process command. U
 2. In Render, choose **New**, then **Blueprint**, and select the repo.
 3. Confirm the database, Redis, web service, Celery worker, and dispatcher.
 4. Deploy. The health check path is `/`.
-5. Copy the web service URL from the dashboard and call it:
-
-```bash
-curl -sS https://<your-render-host>/
-curl -sS -D - -H 'Content-Type: application/json' \
-  -d '{"transaction_id":"txn_abc123def456","source_account":"acc_user_789","destination_account":"acc_merchant_456","amount":1500,"currency":"INR"}' \
-  https://<your-render-host>/v1/webhooks/transactions
-```
+5. The web service URL for this project is https://transaction-webhook-service-2.onrender.com. Call it with the curl commands at the top of this section.
 
 You can also create the services by hand:
 
@@ -504,4 +515,4 @@ render.yaml                  Render service definitions
 - Tests run on SQLite. They do not prove the PostgreSQL row lock or a live Redis broker.
 - After Celery's five retries, the outbox keeps publishing the same unfinished transaction. A bug in processing will be retried until the code or the data changes.
 - There is no metrics dashboard, dead-letter screen, or autoscaling setup.
-- The service is not deployed, and this folder has not been published as the submission repository.
+- The Render web service is live at https://transaction-webhook-service-2.onrender.com. Background processing still depends on the worker and dispatcher services staying up. The free instance sleeps when idle.
