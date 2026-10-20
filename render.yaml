@@ -1,0 +1,118 @@
+# Render services for the API, Celery worker, and outbox dispatcher.
+# Apply this from the Render dashboard, or follow the manual steps in the README.
+# Render chooses the public URL. This file does not contain one.
+
+databases:
+  - name: transaction-webhook-db
+    plan: basic
+    databaseName: webhook
+    user: webhook
+
+services:
+  - type: redis
+    name: transaction-webhook-redis
+    plan: free
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+  - type: web
+    name: transaction-webhook-api
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: transaction-webhook-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: transaction-webhook-redis
+          property: connectionString
+      - key: CELERY_TASK_QUEUE
+        value: transactions
+      - key: PROCESSING_DELAY_SECONDS
+        value: "30"
+      - key: PROCESSING_LEASE_SECONDS
+        value: "120"
+      - key: OUTBOX_POLL_INTERVAL_SECONDS
+        value: "1"
+      - key: OUTBOX_BATCH_SIZE
+        value: "50"
+      - key: OUTBOX_VISIBILITY_TIMEOUT_SECONDS
+        value: "180"
+
+  - type: worker
+    name: transaction-webhook-worker
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: celery -A app.workers.celery_app:celery_app worker --loglevel=info -Q transactions
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: transaction-webhook-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: transaction-webhook-redis
+          property: connectionString
+      - key: CELERY_TASK_QUEUE
+        value: transactions
+      - key: PROCESSING_DELAY_SECONDS
+        value: "30"
+      - key: PROCESSING_LEASE_SECONDS
+        value: "120"
+      - key: OUTBOX_POLL_INTERVAL_SECONDS
+        value: "1"
+      - key: OUTBOX_BATCH_SIZE
+        value: "50"
+      - key: OUTBOX_VISIBILITY_TIMEOUT_SECONDS
+        value: "180"
+
+  - type: worker
+    name: transaction-webhook-dispatcher
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: python -m app.workers.dispatcher
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: transaction-webhook-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: transaction-webhook-redis
+          property: connectionString
+      - key: CELERY_TASK_QUEUE
+        value: transactions
+      - key: PROCESSING_DELAY_SECONDS
+        value: "30"
+      - key: PROCESSING_LEASE_SECONDS
+        value: "120"
+      - key: OUTBOX_POLL_INTERVAL_SECONDS
+        value: "1"
+      - key: OUTBOX_BATCH_SIZE
+        value: "50"
+      - key: OUTBOX_VISIBILITY_TIMEOUT_SECONDS
+        value: "180"

@@ -1,0 +1,97 @@
+x-app-environment: &app_env
+  APP_ENV: local
+  LOG_LEVEL: INFO
+  DATABASE_URL: postgresql+psycopg://webhook:webhook@postgres:5432/webhook
+  REDIS_URL: redis://redis:6379/0
+  CELERY_TASK_QUEUE: transactions
+  PROCESSING_DELAY_SECONDS: "30"
+  PROCESSING_LEASE_SECONDS: "120"
+  OUTBOX_POLL_INTERVAL_SECONDS: "1"
+  OUTBOX_BATCH_SIZE: "50"
+  OUTBOX_VISIBILITY_TIMEOUT_SECONDS: "180"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: webhook
+      POSTGRES_PASSWORD: webhook
+      POSTGRES_DB: webhook
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webhook -d webhook"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    environment: *app_env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  worker:
+    build: .
+    command:
+      [
+        "celery",
+        "-A",
+        "app.workers.celery_app:celery_app",
+        "worker",
+        "--loglevel=info",
+        "-Q",
+        "transactions",
+      ]
+    environment: *app_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+  dispatcher:
+    build: .
+    command: ["python", "-m", "app.workers.dispatcher"]
+    environment: *app_env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
